@@ -1,84 +1,308 @@
-async function exportBothViewsToPdf(item, iframeM, iframeD) {
-  try {
-    if (!iframeM || !iframeD) {
-      alert('Previews not ready. Make sure the file is uploaded and previews have loaded.');
-      return;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-HTML Previewer + PDF Export</title>
+  <style>
+    :root{
+      --bg: #0b1220;
+      --card: #0f172a;
+      --muted: #94a3b8;
+      --accent: #60a5fa;
+      --ring: #1f2937;
+      --text: #e5e7eb;
+      --danger: #ef4444;
+      --ok: #22c55e;
+    }
+    html, body { height: 100%; }
+    body{
+      margin:0; background: var(--bg); color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, Ubuntu, Cantarell, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    header{
+      position: sticky; top: 0; z-index: 10;
+      background: linear-gradient(180deg, rgba(2,6,23,.9), rgba(2,6,23,.6));
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid #1e293b;
+    }
+    .wrap{ max-width:1200px; margin:0 auto; padding: 16px; }
+    .row{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .btn{ border:1px solid #1f2937; background:#0f172a; color:var(--text); padding:10px 14px; border-radius:12px; cursor:pointer; }
+    .btn:hover{ border-color:#334155; }
+    .btn.primary{ background: linear-gradient(180deg, #2563eb, #1d4ed8); border-color:#1e40af; }
+    .btn.ghost{ background:transparent; }
+    .btn.danger{ background: linear-gradient(180deg, #b91c1c, #991b1b); border-color:#7f1d1d; }
+    .hint{ color: var(--muted); font-size: 14px; }
+
+    .grid{
+      display:grid; grid-template-columns: repeat(12, 1fr); gap:16px;
+    }
+    .card{ background:var(--card); border:1px solid #1f2937; border-radius:16px; padding:16px; }
+
+    .file-card{ grid-column: span 12; }
+    .title-row{ display:flex; gap:8px; align-items:center; }
+    .title-row input{
+      flex:1; padding:10px 12px; border-radius:10px; border:1px solid #1f2937; background:#0b1324; color:var(--text);
     }
 
-    await waitForIframe(iframeM);
-    await waitForIframe(iframeD);
+    .views{ display:flex; flex-direction:column; gap:16px; margin-top:12px; }
 
-    const docM = iframeM.contentDocument;
-    const docD = iframeD.contentDocument;
-    if (!docM || !docD) {
-      alert('Unable to access preview content (possibly cross-origin).');
-      return;
+    .frame-wrap{ background:#020617; border:1px solid #1f2937; border-radius:12px; padding:12px; }
+    .frame-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .badge{ font-size:12px; color:#cbd5e1; background:#0b1324; padding:4px 8px; border-radius:999px; border:1px solid #1f2937; }
+
+    iframe{ display:block; width:100%; background:white; border:0; border-radius:10px; }
+    iframe.mobile{ width:375px; margin:0 auto; }
+    iframe.desktop{ width:100%; }
+
+    .empty{ border:1px dashed #334155; padding:28px; border-radius:16px; text-align:center; color:#94a3b8; }
+
+    dialog.modal{ border:1px solid #1f2937; border-radius:16px; padding:0; width:min(720px, 92vw); background: #0b1324; color:var(--text); }
+    .modal header{ position:sticky; top:0; background:#0b1324; border-bottom:1px solid #1f2937; padding:14px 16px; }
+    .modal .body{ padding:16px; }
+    .modal .footer{ display:flex; gap:8px; justify-content:flex-end; border-top:1px solid #1f2937; padding:14px 16px; }
+    .dropzone{ border:2px dashed #334155; border-radius:14px; padding:24px; text-align:center; cursor:pointer; }
+    .dropzone.drag{ background:#111827; }
+
+    @media print {
+      header, .controls, .hint, .modal, dialog { display:none !important; }
+      body { background:white; color:black; }
+      .wrap{ max-width:none; }
+      .file-card{ break-inside: avoid; page-break-inside: avoid; }
+      .views{ flex-direction:column; gap:12px; }
+      iframe{ width:100%; }
+      iframe.mobile{ width:375px; margin:0 auto; }
+      @page { size: A4; margin: 12mm; }
     }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="wrap row controls">
+      <h1 style="margin:0; font-size:18px; letter-spacing:.2px;">Multi-HTML Previewer</h1>
+      <span class="hint">Upload multiple HTML files, edit their <code>&lt;title&gt;</code>, preview in desktop & mobile frames, then export each to PDF.</span>
+      <div style="flex:1"></div>
+      <button id="openModalBtn" class="btn primary">Upload HTML Files</button>
+      <button id="clearBtn" class="btn ghost">Clear</button>
+    </div>
+  </header>
 
-    // Create export wrapper
-    const wrapper = document.createElement('div');
-    wrapper.style.background = 'white';
-    wrapper.style.color = 'black';
-    wrapper.style.width = '100%';
-    wrapper.style.fontFamily = 'sans-serif';
-    wrapper.style.pageBreakInside = 'avoid';
+  <main class="wrap" id="app">
+    <div id="empty" class="empty">
+      <p><strong>No files yet.</strong></p>
+      <p>Click <em>Upload HTML Files</em> to begin, or drag and drop files anywhere on this page.</p>
+      <p class="hint">Note: For safety, previews run in sandboxed iframes. External assets and scripts may not execute.</p>
+    </div>
+    <div id="filesGrid" class="grid" hidden></div>
+  </main>
 
-    // Title
-    const titleEl = document.createElement('h2');
-    titleEl.textContent = item.title || item.name;
-    titleEl.style.margin = '16px 0';
-    wrapper.appendChild(titleEl);
+  <dialog id="uploadModal" class="modal">
+    <header>
+      <div class="row">
+        <div style="font-weight:600">Add HTML Files</div>
+        <div style="flex:1"></div>
+        <button class="btn ghost" id="closeModalBtn" aria-label="Close">✕</button>
+      </div>
+    </header>
+    <div class="body">
+      <label class="dropzone" id="dropzone">
+        <input id="fileInput" type="file" accept=".html,text/html" multiple hidden />
+        <div>
+          <div style="font-size:18px; margin-bottom:6px;">Drop files here or click to browse</div>
+          <div class="hint">Accepts .html files • Multiple selection supported</div>
+        </div>
+      </label>
+    </div>
+    <div class="footer">
+      <button id="addFilesBtn" class="btn primary">Add</button>
+      <button id="cancelBtn" class="btn ghost">Cancel</button>
+    </div>
+  </dialog>
 
-    function cloneSection(doc, width, label) {
-      const section = document.createElement('div');
-      section.style.width = width;
-      section.style.margin = '0 auto 20px';
-      section.style.pageBreakInside = 'avoid';
+<script>
+(function(){
+  const state = { items: [] };
+  const filesGrid = document.getElementById('filesGrid');
+  const empty = document.getElementById('empty');
+  const uploadModal = document.getElementById('uploadModal');
+  const openModalBtn = document.getElementById('openModalBtn');
+  const closeModalBtn = document.getElementById('closeModalBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const addFilesBtn = document.getElementById('addFilesBtn');
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const clearBtn = document.getElementById('clearBtn');
 
-      const subtitle = document.createElement('h3');
-      subtitle.textContent = label;
-      subtitle.style.margin = '8px 0';
-      section.appendChild(subtitle);
+  openModalBtn.addEventListener('click', () => {
+    if (uploadModal.showModal) uploadModal.showModal();
+    else uploadModal.setAttribute('open', '');
+  });
+  closeModalBtn.addEventListener('click', () => uploadModal.close());
+  cancelBtn.addEventListener('click', () => uploadModal.close());
+  addFilesBtn.addEventListener('click', () => fileInput.click());
 
-      // Inline <style> from iframe head
-      const styleTag = document.createElement('style');
-      Array.from(doc.querySelectorAll('style')).forEach(s => {
-        styleTag.textContent += s.textContent + '\n';
-      });
-      section.appendChild(styleTag);
+  ;['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, e=>{ e.preventDefault(); dropzone.classList.add('drag'); }));
+  ;['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e=>{ e.preventDefault(); dropzone.classList.remove('drag'); }));
+  dropzone.addEventListener('click', ()=> fileInput.click());
+  dropzone.addEventListener('drop', (e)=> handleFiles(e.dataTransfer.files));
+  fileInput.addEventListener('change', (e)=> handleFiles(e.target.files));
 
-      // Clone body
-      const bodyWrap = document.createElement('div');
-      bodyWrap.innerHTML = doc.body.innerHTML;
-      section.appendChild(bodyWrap);
+  ;['dragenter','dragover'].forEach(ev => document.addEventListener(ev, e=>{ e.preventDefault(); }));
+  document.addEventListener('drop', (e)=>{ e.preventDefault(); handleFiles(e.dataTransfer.files); });
 
-      return section;
-    }
+  async function handleFiles(fileList){
+    if(!fileList || !fileList.length) return;
+    const files = Array.from(fileList).filter(f=>/\.html?$/.test(f.name.toLowerCase()));
+    if(!files.length) return;
 
-    // Append Mobile first, then Desktop
-    wrapper.appendChild(cloneSection(docM, '375px', '📱 Mobile View'));
-    wrapper.appendChild(cloneSection(docD, '100%', '🖥️ Desktop View'));
-
-    // Place wrapper off-screen but still renderable
-    wrapper.style.position = 'absolute';
-    wrapper.style.left = '-9999px';
-    document.body.appendChild(wrapper);
-
-    // Export to PDF
-    const filename = `${(item.title || item.name).replace(/\\s+/g, '_')}.pdf`;
-    const opt = {
-      margin: 10,
-      filename,
-      image: { type: 'jpeg', quality: 1 },
-      html2canvas: { scale: 2, useCORS: true, allowTaint: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-
-    await html2pdf().set(opt).from(wrapper).save();
-    wrapper.remove();
-
-  } catch (err) {
-    console.error(err);
-    alert('Failed to export PDF: ' + (err?.message || err));
+    const parsed = await Promise.all(files.map(readHtmlFile));
+    parsed.forEach(item => state.items.push(item));
+    render();
+    uploadModal.close();
+    fileInput.value = '';
   }
-}
+
+  function readHtmlFile(file){
+    return new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => {
+        const raw = String(reader.result || '');
+        const {title, normalized} = extractAndNormalizeTitle(raw);
+        resolve({ id: crypto.randomUUID(), name: file.name, title: title || file.name, html: normalized, updatedHtml: normalized });
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  function extractAndNormalizeTitle(html){
+    try{
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const title = doc.querySelector('title')?.textContent?.trim() || '';
+      if(!doc.head) doc.documentElement.insertBefore(doc.createElement('head'), doc.body || null);
+      if(!doc.querySelector('meta[charset]')){
+        const meta = doc.createElement('meta'); meta.setAttribute('charset','UTF-8'); doc.head.prepend(meta);
+      }
+      if(!doc.querySelector('meta[name="viewport"]')){
+        const mv = doc.createElement('meta'); mv.setAttribute('name','viewport'); mv.setAttribute('content','width=device-width, initial-scale=1'); doc.head.appendChild(mv);
+      }
+      if(!doc.querySelector('title')){
+        const t = doc.createElement('title'); t.textContent = title || 'Untitled'; doc.head.appendChild(t);
+      }
+      const normalized = '<!DOCTYPE html>' + '\n' + doc.documentElement.outerHTML;
+      return { title, normalized };
+    }catch(err){
+      return { title: '', normalized: html };
+    }
+  }
+
+  function render(){
+    if(!state.items.length){
+      empty.hidden = false; filesGrid.hidden = true; filesGrid.innerHTML = '';
+      return;
+    }
+    empty.hidden = true; filesGrid.hidden = false;
+    filesGrid.innerHTML = state.items.map(item => cardTemplate(item)).join('');
+    state.items.forEach(item => bindCard(item.id));
+  }
+
+  function cardTemplate(item){
+    return `
+      <section class="card file-card" id="card-${item.id}">
+        <div class="title-row">
+          <div style="font-weight:600">${escapeHtml(item.name)}</div>
+          <div style="flex:1"></div>
+          <button class="btn danger" data-remove="${item.id}">Remove</button>
+          <button class="btn" data-export="${item.id}">Export PDF</button>
+        </div>
+        <div class="row" style="margin-top:10px; gap:8px;">
+          <label style="font-size:14px; color:var(--muted)">Title:</label>
+          <input type="text" value="${escapeHtml(item.title)}" data-title="${item.id}" aria-label="Edit HTML title" />
+          <button class="btn" data-apply="${item.id}">Apply to Views</button>
+        </div>
+        <div class="views">
+          <div class="frame-wrap">
+            <div class="frame-head"><span class="badge">Mobile 375×Auto</span></div>
+            <iframe class="mobile" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-frame-mobile="${item.id}"></iframe>
+          </div>
+          <div class="frame-wrap">
+            <div class="frame-head"><span class="badge">Desktop Full Width</span></div>
+            <iframe class="desktop" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-frame-desktop="${item.id}"></iframe>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function bindCard(id){
+    const item = state.items.find(x=>x.id===id);
+    const input = document.querySelector(`[data-title="${id}"]`);
+    const btnApply = document.querySelector(`[data-apply="${id}"]`);
+    const btnRemove = document.querySelector(`[data-remove="${id}"]`);
+    const btnExport = document.querySelector(`[data-export="${id}"]`);
+    const iframeD = document.querySelector(`[data-frame-desktop="${id}"]`);
+    const iframeM = document.querySelector(`[data-frame-mobile="${id}"]`);
+
+    setIframeSrcdoc(iframeD, item.updatedHtml);
+    setIframeSrcdoc(iframeM, item.updatedHtml);
+
+    iframeD.addEventListener('load', ()=> resizeIframe(iframeD));
+    iframeM.addEventListener('load', ()=> resizeIframe(iframeM));
+
+    input.addEventListener('input', () => { item.title = input.value; });
+    btnApply.addEventListener('click', ()=>{
+      item.updatedHtml = applyTitleToHtml(item.updatedHtml, item.title);
+      setIframeSrcdoc(iframeD, item.updatedHtml);
+      setIframeSrcdoc(iframeM, item.updatedHtml);
+    });
+    btnRemove.addEventListener('click', ()=>{
+      state.items = state.items.filter(x=>x.id!==id);
+      render();
+    });
+    btnExport.addEventListener('click', ()=>{
+      exportBothViewsToPdf(item, iframeM, iframeD);
+    });
+  }
+
+  function setIframeSrcdoc(iframe, html){
+    iframe.srcdoc = html;
+  }
+
+  function applyTitleToHtml(html, newTitle){
+    try{
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      let t = doc.querySelector('title');
+      if(!t){ t = doc.createElement('title'); doc.head.appendChild(t); }
+      t.textContent = newTitle || 'Untitled';
+      return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+    }catch(err){
+      if(/<title>[\s\S]*?<\/title>/i.test(html)){
+        return html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(newTitle)}</title>`);
+      }
+      return html;
+    }
+  }
+
+  function escapeHtml(s=''){
+    return s.replace(/[&<>"']/g, m=>({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'
+    })[m]);
+  }
+
+  function resizeIframe(iframe){
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
+      iframe.style.height = doc.documentElement.scrollHeight + 'px';
+    } catch (e) {}
+  }
+
+  function waitForIframe(iframe){
+    return new Promise(resolve => {
+      if(iframe.contentDocument && iframe.contentDocument.readyState === 'complete') resolve();
+      else iframe.addEventListener('load', ()=> resolve(), {once:true});
+    });
+  }
+
+  async function exportBoth
