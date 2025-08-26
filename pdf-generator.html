@@ -45,15 +45,16 @@
     .title-row input{
       flex:1; padding:10px 12px; border-radius:10px; border:1px solid #1f2937; background:#0b1324; color:var(--text);
     }
-    .views{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:12px; }
+
+    .views{ display:flex; flex-direction:column; gap:16px; margin-top:12px; }
 
     .frame-wrap{ background:#020617; border:1px solid #1f2937; border-radius:12px; padding:12px; }
     .frame-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
     .badge{ font-size:12px; color:#cbd5e1; background:#0b1324; padding:4px 8px; border-radius:999px; border:1px solid #1f2937; }
 
     iframe{ display:block; width:100%; background:white; border:0; border-radius:10px; }
-    iframe.desktop{ height: 900px; /* desktop viewport height */ }
-    iframe.mobile{ height: 667px; width: 375px; margin: 0 auto; /* center */ }
+    iframe.mobile{ width:375px; margin:0 auto; }
+    iframe.desktop{ width:100%; }
 
     .empty{ border:1px dashed #334155; padding:28px; border-radius:16px; text-align:center; color:#94a3b8; }
 
@@ -64,27 +65,26 @@
     .dropzone{ border:2px dashed #334155; border-radius:14px; padding:24px; text-align:center; cursor:pointer; }
     .dropzone.drag{ background:#111827; }
 
-    /* Print styles: produce one continuous long document */
     @media print {
       header, .controls, .hint, .modal, dialog { display:none !important; }
       body { background:white; color:black; }
       .wrap{ max-width:none; }
       .file-card{ break-inside: avoid; page-break-inside: avoid; }
-      .views{ grid-template-columns: 1fr 1fr; gap:12px; }
-      iframe.desktop{ height: 900px; }
-      iframe.mobile{ height: 667px; width: 375px; margin: 0; }
+      .views{ flex-direction:column; gap:12px; }
+      iframe{ width:100%; }
+      iframe.mobile{ width:375px; margin:0 auto; }
       @page { size: A4; margin: 12mm; }
     }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
   <header>
     <div class="wrap row controls">
       <h1 style="margin:0; font-size:18px; letter-spacing:.2px;">Multi-HTML Previewer</h1>
-      <span class="hint">Upload multiple HTML files, edit their <code>&lt;title&gt;</code>, preview in desktop & mobile frames, then export to a single PDF.</span>
+      <span class="hint">Upload multiple HTML files, edit their <code>&lt;title&gt;</code>, preview in desktop & mobile frames, then export each to PDF.</span>
       <div style="flex:1"></div>
       <button id="openModalBtn" class="btn primary">Upload HTML Files</button>
-      <button id="exportPdfBtn" class="btn">Export to PDF</button>
       <button id="clearBtn" class="btn ghost">Clear</button>
     </div>
   </header>
@@ -98,7 +98,6 @@
     <div id="filesGrid" class="grid" hidden></div>
   </main>
 
-  <!-- Upload Modal -->
   <dialog id="uploadModal" class="modal">
     <header>
       <div class="row">
@@ -124,11 +123,9 @@
 
 <script>
 (function(){
-  const state = { items: [] }; // { id, name, title, html, updatedHtml }
-  const app = document.getElementById('app');
+  const state = { items: [] };
   const filesGrid = document.getElementById('filesGrid');
   const empty = document.getElementById('empty');
-
   const uploadModal = document.getElementById('uploadModal');
   const openModalBtn = document.getElementById('openModalBtn');
   const closeModalBtn = document.getElementById('closeModalBtn');
@@ -136,23 +133,19 @@
   const addFilesBtn = document.getElementById('addFilesBtn');
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
-  const exportPdfBtn = document.getElementById('exportPdfBtn');
   const clearBtn = document.getElementById('clearBtn');
 
-  // Modal open/close
   openModalBtn.addEventListener('click', () => uploadModal.showModal());
   closeModalBtn.addEventListener('click', () => uploadModal.close());
   cancelBtn.addEventListener('click', () => uploadModal.close());
   addFilesBtn.addEventListener('click', () => fileInput.click());
 
-  // Drag & drop on dropzone
   ;['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, e=>{ e.preventDefault(); dropzone.classList.add('drag'); }));
   ;['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e=>{ e.preventDefault(); dropzone.classList.remove('drag'); }));
   dropzone.addEventListener('click', ()=> fileInput.click());
   dropzone.addEventListener('drop', (e)=> handleFiles(e.dataTransfer.files));
   fileInput.addEventListener('change', (e)=> handleFiles(e.target.files));
 
-  // Global document drag & drop (optional)
   ;['dragenter','dragover'].forEach(ev => document.addEventListener(ev, e=>{ e.preventDefault(); }));
   document.addEventListener('drop', (e)=>{ e.preventDefault(); handleFiles(e.dataTransfer.files); });
 
@@ -165,7 +158,6 @@
     parsed.forEach(item => state.items.push(item));
     render();
     uploadModal.close();
-    // reset input to allow re-adding same files later
     fileInput.value = '';
   }
 
@@ -186,7 +178,6 @@
     try{
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const title = doc.querySelector('title')?.textContent?.trim() || '';
-      // Ensure document has a <head><meta charset> and a <title>
       if(!doc.head) doc.documentElement.insertBefore(doc.createElement('head'), doc.body || null);
       if(!doc.querySelector('meta[charset]')){
         const meta = doc.createElement('meta'); meta.setAttribute('charset','UTF-8'); doc.head.prepend(meta);
@@ -211,34 +202,31 @@
     }
     empty.hidden = true; filesGrid.hidden = false;
     filesGrid.innerHTML = state.items.map(item => cardTemplate(item)).join('');
-
-    // bind events for each card
     state.items.forEach(item => bindCard(item.id));
   }
 
   function cardTemplate(item){
-    const safeName = escapeHtml(item.name);
-    const safeTitle = escapeHtml(item.title);
     return `
       <section class="card file-card" id="card-${item.id}">
         <div class="title-row">
-          <div style="font-weight:600">${safeName}</div>
+          <div style="font-weight:600">${escapeHtml(item.name)}</div>
           <div style="flex:1"></div>
           <button class="btn danger" data-remove="${item.id}">Remove</button>
+          <button class="btn" data-export="${item.id}">Export PDF</button>
         </div>
         <div class="row" style="margin-top:10px; gap:8px;">
           <label style="font-size:14px; color:var(--muted)">Title:</label>
-          <input type="text" value="${safeTitle}" data-title="${item.id}" aria-label="Edit HTML title" />
+          <input type="text" value="${escapeHtml(item.title)}" data-title="${item.id}" aria-label="Edit HTML title" />
           <button class="btn" data-apply="${item.id}">Apply to Views</button>
         </div>
         <div class="views">
           <div class="frame-wrap">
-            <div class="frame-head"><span class="badge">Desktop 1440×900</span><span class="hint">sandboxed</span></div>
-            <iframe class="desktop" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-frame-desktop="${item.id}"></iframe>
+            <div class="frame-head"><span class="badge">Mobile 375×Auto</span></div>
+            <iframe class="mobile" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-frame-mobile="${item.id}"></iframe>
           </div>
           <div class="frame-wrap">
-            <div class="frame-head"><span class="badge">Mobile 375×667</span><span class="hint">sandboxed</span></div>
-            <iframe class="mobile" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-frame-mobile="${item.id}"></iframe>
+            <div class="frame-head"><span class="badge">Desktop Full Width</span></div>
+            <iframe class="desktop" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-frame-desktop="${item.id}"></iframe>
           </div>
         </div>
       </section>
@@ -250,12 +238,15 @@
     const input = document.querySelector(`[data-title="${id}"]`);
     const btnApply = document.querySelector(`[data-apply="${id}"]`);
     const btnRemove = document.querySelector(`[data-remove="${id}"]`);
+    const btnExport = document.querySelector(`[data-export="${id}"]`);
     const iframeD = document.querySelector(`[data-frame-desktop="${id}"]`);
     const iframeM = document.querySelector(`[data-frame-mobile="${id}"]`);
 
-    // initial paint
     setIframeSrcdoc(iframeD, item.updatedHtml);
     setIframeSrcdoc(iframeM, item.updatedHtml);
+
+    iframeD.addEventListener('load', ()=> resizeIframe(iframeD));
+    iframeM.addEventListener('load', ()=> resizeIframe(iframeM));
 
     input.addEventListener('input', () => { item.title = input.value; });
     btnApply.addEventListener('click', ()=>{
@@ -267,10 +258,12 @@
       state.items = state.items.filter(x=>x.id!==id);
       render();
     });
+    btnExport.addEventListener('click', ()=>{
+      exportBothViewsToPdf(item, iframeM, iframeD);
+    });
   }
 
   function setIframeSrcdoc(iframe, html){
-    // Use srcdoc to avoid external requests; sandbox already applied
     iframe.srcdoc = html;
   }
 
@@ -282,7 +275,6 @@
       t.textContent = newTitle || 'Untitled';
       return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
     }catch(err){
-      // Fallback: naive replace
       if(/<title>[\s\S]*?<\/title>/i.test(html)){
         return html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(newTitle)}</title>`);
       }
@@ -296,17 +288,16 @@
     })[m]);
   }
 
-  exportPdfBtn.addEventListener('click', ()=>{
-    window.print(); // Use the browser's Print to PDF to create a single combined PDF document
-  });
+  function resizeIframe(iframe){
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
+      iframe.style.height = doc.documentElement.scrollHeight + 'px';
+    } catch (e) {}
+  }
 
-  clearBtn.addEventListener('click', ()=>{
-    if(confirm('Clear all uploaded files?')){
-      state.items = []; render();
-    }
-  });
-
-})();
-</script>
-</body>
-</html>
+  function exportBothViewsToPdf(item, iframeM, iframeD){
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <h2 style="margin:16px 0;">${escapeHtml(item.title)}</h2>
+      <div>${iframeM.contentDocument.documentElement.outerHTML}</div>
+      <div style="margin-top:24px;">${iframeD.contentDocument.documentElement
