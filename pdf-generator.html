@@ -58,12 +58,15 @@
 
     .empty{ border:1px dashed #334155; padding:28px; border-radius:16px; text-align:center; color:#94a3b8; }
 
-    dialog.modal{ border:1px solid #1f2937; border-radius:16px; padding:0; width:min(720px, 92vw); background: #0b1324; color:var(--text); }
+    dialog.modal{ border:1px solid #1f2937; border-radius:16px; padding:0; width:min(720px, 92vw); background: #0b1324; color:var(--text); z-index:10002; }
     .modal header{ position:sticky; top:0; background:#0b1324; border-bottom:1px solid #1f2937; padding:14px 16px; }
     .modal .body{ padding:16px; }
     .modal .footer{ display:flex; gap:8px; justify-content:flex-end; border-top:1px solid #1f2937; padding:14px 16px; }
     .dropzone{ border:2px dashed #334155; border-radius:14px; padding:24px; text-align:center; cursor:pointer; }
     .dropzone.drag{ background:#111827; }
+
+    /* fallback overlay for browsers that don't support <dialog>.showModal */
+    #modalOverlay{ position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:10001; display:none; }
 
     @media print {
       header, .controls, .hint, .modal, dialog { display:none !important; }
@@ -82,10 +85,10 @@
   <header>
     <div class="wrap row controls">
       <h1 style="margin:0; font-size:18px; letter-spacing:.2px;">Multi-HTML Previewer</h1>
-      <span class="hint">Upload multiple HTML files, edit their <code>&lt;title&gt;</code>, preview in desktop & mobile frames, then export each to PDF.</span>
+      <span class="hint">Upload multiple HTML files, edit their <code>&lt;title&gt;</code>, preview in mobile (first) & desktop (second) frames, then export both into one PDF.</span>
       <div style="flex:1"></div>
-      <button id="openModalBtn" class="btn primary">Upload HTML Files</button>
-      <button id="clearBtn" class="btn ghost">Clear</button>
+      <button id="openModalBtn" class="btn primary" type="button">Upload HTML Files</button>
+      <button id="clearBtn" class="btn ghost" type="button">Clear</button>
     </div>
   </header>
 
@@ -98,12 +101,14 @@
     <div id="filesGrid" class="grid" hidden></div>
   </main>
 
+  <div id="modalOverlay" aria-hidden="true"></div>
+
   <dialog id="uploadModal" class="modal">
     <header>
       <div class="row">
         <div style="font-weight:600">Add HTML Files</div>
         <div style="flex:1"></div>
-        <button class="btn ghost" id="closeModalBtn" aria-label="Close">✕</button>
+        <button class="btn ghost" id="closeModalBtn" aria-label="Close" type="button">✕</button>
       </div>
     </header>
     <div class="body">
@@ -116,38 +121,91 @@
       </label>
     </div>
     <div class="footer">
-      <button id="addFilesBtn" class="btn primary">Add</button>
-      <button id="cancelBtn" class="btn ghost">Cancel</button>
+      <button id="addFilesBtn" class="btn primary" type="button">Add</button>
+      <button id="cancelBtn" class="btn ghost" type="button">Cancel</button>
     </div>
   </dialog>
 
 <script>
 (function(){
+  // --- small helpers ---
+  const $ = id => document.getElementById(id);
+  const safeOn = (el, ev, fn) => { if(el) el.addEventListener(ev, fn); };
+
   const state = { items: [] };
-  const filesGrid = document.getElementById('filesGrid');
-  const empty = document.getElementById('empty');
-  const uploadModal = document.getElementById('uploadModal');
-  const openModalBtn = document.getElementById('openModalBtn');
-  const closeModalBtn = document.getElementById('closeModalBtn');
-  const cancelBtn = document.getElementById('cancelBtn');
-  const addFilesBtn = document.getElementById('addFilesBtn');
-  const dropzone = document.getElementById('dropzone');
-  const fileInput = document.getElementById('fileInput');
-  const clearBtn = document.getElementById('clearBtn');
+  const filesGrid = $('filesGrid');
+  const empty = $('empty');
+  const uploadModal = $('uploadModal');
+  const openModalBtn = $('openModalBtn');
+  const closeModalBtn = $('closeModalBtn');
+  const cancelBtn = $('cancelBtn');
+  const addFilesBtn = $('addFilesBtn');
+  const dropzone = $('dropzone');
+  const fileInput = $('fileInput');
+  const clearBtn = $('clearBtn');
+  const modalOverlay = $('modalOverlay');
 
-  openModalBtn.addEventListener('click', () => uploadModal.showModal());
-  closeModalBtn.addEventListener('click', () => uploadModal.close());
-  cancelBtn.addEventListener('click', () => uploadModal.close());
-  addFilesBtn.addEventListener('click', () => fileInput.click());
+  // Robust modal open/close (handles browsers without dialog.showModal)
+  function showModal(modal){
+    if(!modal) return;
+    try{
+      if(typeof modal.showModal === 'function'){
+        modal.showModal();
+      } else {
+        // fallback: show overlay + set styles
+        modal.style.display = 'block';
+        modal.setAttribute('open','');
+        modal.style.position = 'fixed';
+        modal.style.left = '50%';
+        modal.style.top = '50%';
+        modal.style.transform = 'translate(-50%, -50%)';
+        modal.style.zIndex = 10002;
+        if(modalOverlay){ modalOverlay.style.display = 'block'; }
+      }
+    }catch(e){
+      // last resort
+      modal.style.display = 'block';
+    }
+  }
 
-  ;['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, e=>{ e.preventDefault(); dropzone.classList.add('drag'); }));
-  ;['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e=>{ e.preventDefault(); dropzone.classList.remove('drag'); }));
-  dropzone.addEventListener('click', ()=> fileInput.click());
-  dropzone.addEventListener('drop', (e)=> handleFiles(e.dataTransfer.files));
-  fileInput.addEventListener('change', (e)=> handleFiles(e.target.files));
+  function closeModal(modal){
+    if(!modal) return;
+    try{
+      if(typeof modal.close === 'function'){
+        modal.close();
+      } else {
+        modal.removeAttribute('open');
+        modal.style.display = 'none';
+        modal.style.transform = '';
+        if(modalOverlay){ modalOverlay.style.display = 'none'; }
+      }
+    }catch(e){
+      modal.style.display = 'none';
+    }
+  }
 
-  ;['dragenter','dragover'].forEach(ev => document.addEventListener(ev, e=>{ e.preventDefault(); }));
+  // attach UI handlers (guarded)
+  safeOn(openModalBtn, 'click', ()=> showModal(uploadModal));
+  safeOn(closeModalBtn, 'click', ()=> closeModal(uploadModal));
+  safeOn(cancelBtn, 'click', ()=> closeModal(uploadModal));
+  safeOn(addFilesBtn, 'click', ()=> fileInput && fileInput.click());
+
+  // Dropzone handlers
+  if(dropzone){
+    ['dragenter','dragover'].forEach(ev=> safeOn(dropzone, ev, e=>{ e.preventDefault(); dropzone.classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev=> safeOn(dropzone, ev, e=>{ e.preventDefault(); dropzone.classList.remove('drag'); }));
+    safeOn(dropzone, 'click', ()=> fileInput && fileInput.click());
+    safeOn(dropzone, 'drop', (e)=> handleFiles(e.dataTransfer.files));
+  }
+
+  // Global drag/drop (prevents navigating)
+  ['dragenter','dragover'].forEach(ev => document.addEventListener(ev, e=>{ e.preventDefault(); }));
   document.addEventListener('drop', (e)=>{ e.preventDefault(); handleFiles(e.dataTransfer.files); });
+
+  safeOn(fileInput, 'change', (e)=> handleFiles(e.target.files));
+
+  // modal overlay click to close (fallback)
+  if(modalOverlay) modalOverlay.addEventListener('click', ()=> closeModal(uploadModal));
 
   async function handleFiles(fileList){
     if(!fileList || !fileList.length) return;
@@ -157,8 +215,8 @@
     const parsed = await Promise.all(files.map(readHtmlFile));
     parsed.forEach(item => state.items.push(item));
     render();
-    uploadModal.close();
-    fileInput.value = '';
+    closeModal(uploadModal);
+    if(fileInput) fileInput.value = '';
   }
 
   function readHtmlFile(file){
@@ -211,13 +269,13 @@
         <div class="title-row">
           <div style="font-weight:600">${escapeHtml(item.name)}</div>
           <div style="flex:1"></div>
-          <button class="btn danger" data-remove="${item.id}">Remove</button>
-          <button class="btn" data-export="${item.id}">Export PDF</button>
+          <button class="btn danger" data-remove="${item.id}" type="button">Remove</button>
+          <button class="btn" data-export="${item.id}" type="button">Export PDF</button>
         </div>
         <div class="row" style="margin-top:10px; gap:8px;">
           <label style="font-size:14px; color:var(--muted)">Title:</label>
           <input type="text" value="${escapeHtml(item.title)}" data-title="${item.id}" aria-label="Edit HTML title" />
-          <button class="btn" data-apply="${item.id}">Apply to Views</button>
+          <button class="btn" data-apply="${item.id}" type="button">Apply to Views</button>
         </div>
         <div class="views">
           <div class="frame-wrap">
@@ -245,25 +303,28 @@
     setIframeSrcdoc(iframeD, item.updatedHtml);
     setIframeSrcdoc(iframeM, item.updatedHtml);
 
-    iframeD.addEventListener('load', ()=> resizeIframe(iframeD));
-    iframeM.addEventListener('load', ()=> resizeIframe(iframeM));
+    // ensure resize when loaded
+    safeOn(iframeD, 'load', ()=> resizeIframe(iframeD));
+    safeOn(iframeM, 'load', ()=> resizeIframe(iframeM));
 
-    input.addEventListener('input', () => { item.title = input.value; });
-    btnApply.addEventListener('click', ()=>{
+    if(input) input.addEventListener('input', () => { item.title = input.value; });
+    if(btnApply) btnApply.addEventListener('click', ()=>{
       item.updatedHtml = applyTitleToHtml(item.updatedHtml, item.title);
       setIframeSrcdoc(iframeD, item.updatedHtml);
       setIframeSrcdoc(iframeM, item.updatedHtml);
     });
-    btnRemove.addEventListener('click', ()=>{
+    if(btnRemove) btnRemove.addEventListener('click', ()=>{
       state.items = state.items.filter(x=>x.id!==id);
       render();
     });
-    btnExport.addEventListener('click', ()=>{
-      exportBothViewsToPdf(item, iframeM, iframeD);
+    if(btnExport) btnExport.addEventListener('click', async ()=>{
+      await exportBothViewsToPdf(item, iframeM, iframeD);
     });
   }
 
   function setIframeSrcdoc(iframe, html){
+    if(!iframe) return;
+    // small wrapper so external css in iframe head is preserved when using srcdoc
     iframe.srcdoc = html;
   }
 
@@ -283,7 +344,7 @@
   }
 
   function escapeHtml(s=''){
-    return s.replace(/[&<>"']/g, m=>({
+    return String(s).replace(/[&<>"']/g, m=>({
       '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'
     })[m]);
   }
@@ -291,13 +352,119 @@
   function resizeIframe(iframe){
     try {
       const doc = iframe.contentDocument || iframe.contentWindow.document;
-      iframe.style.height = doc.documentElement.scrollHeight + 'px';
-    } catch (e) {}
+      // use documentElement.scrollHeight which is more robust for full-page length
+      const h = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight);
+      iframe.style.height = h + 'px';
+      iframe.style.overflow = 'hidden';
+    } catch (e) {
+      // ignore cross-origin or other access errors
+    }
   }
 
-  function exportBothViewsToPdf(item, iframeM, iframeD){
-    const container = document.createElement('div');
-    container.innerHTML = `
-      <h2 style="margin:16px 0;">${escapeHtml(item.title)}</h2>
-      <div>${iframeM.contentDocument.documentElement.outerHTML}</div>
-      <div style="margin-top:24px;">${iframeD.contentDocument.documentElement
+  function waitForIframe(iframe, timeout = 3000){
+    return new Promise(resolve => {
+      try{
+        const doc = iframe.contentDocument;
+        if(doc && (doc.readyState === 'complete' || doc.readyState === 'interactive')) return resolve();
+        const onLoad = ()=>{ iframe.removeEventListener('load', onLoad); resolve(); };
+        iframe.addEventListener('load', onLoad);
+        // fallback timeout
+        setTimeout(()=> resolve(), timeout);
+      }catch(e){ resolve(); }
+    });
+  }
+
+  async function exportBothViewsToPdf(item, iframeM, iframeD){
+    try{
+      if(!iframeM || !iframeD){ alert('Previews not ready. Make sure the file is uploaded and previews have loaded.'); return; }
+
+      // wait for both iframes to be ready
+      await waitForIframe(iframeM);
+      await waitForIframe(iframeD);
+
+      const docM = iframeM.contentDocument;
+      const docD = iframeD.contentDocument;
+      if(!docM || !docD){ alert('Unable to access preview content (possibly cross-origin).'); return; }
+
+      // build temporary wrapper that combines mobile (first) then desktop
+      const wrapper = document.createElement('div');
+      wrapper.style.padding = '12px';
+      wrapper.style.background = 'white';
+      wrapper.style.color = 'black';
+      wrapper.style.width = '100%';
+
+      // Title
+      const titleEl = document.createElement('h2');
+      titleEl.textContent = item.title || item.name;
+      titleEl.style.margin = '8px 0 16px';
+      wrapper.appendChild(titleEl);
+
+      // helper to copy inline styles from iframe head
+      function collectInlineStyles(doc){
+        let css = '';
+        Array.from(doc.querySelectorAll('style')).forEach(s=> css += s.textContent + '\n');
+        // note: external <link> stylesheets are not inlined (CORS), so only inline <style> will be preserved
+        return css;
+      }
+
+      // Mobile section
+      const mobileSection = document.createElement('div');
+      mobileSection.style.width = '375px';
+      mobileSection.style.margin = '0 auto 28px';
+      mobileSection.style.boxSizing = 'border-box';
+      const mobileStyleTag = document.createElement('style');
+      mobileStyleTag.textContent = collectInlineStyles(docM);
+      mobileSection.appendChild(mobileStyleTag);
+      const mobileBodyWrap = document.createElement('div');
+      mobileBodyWrap.innerHTML = docM.body.innerHTML;
+      mobileSection.appendChild(mobileBodyWrap);
+      wrapper.appendChild(mobileSection);
+
+      // Desktop section
+      const desktopSection = document.createElement('div');
+      desktopSection.style.width = '100%';
+      desktopSection.style.marginTop = '20px';
+      const desktopStyleTag = document.createElement('style');
+      desktopStyleTag.textContent = collectInlineStyles(docD);
+      desktopSection.appendChild(desktopStyleTag);
+      const desktopBodyWrap = document.createElement('div');
+      desktopBodyWrap.innerHTML = docD.body.innerHTML;
+      desktopSection.appendChild(desktopBodyWrap);
+      wrapper.appendChild(desktopSection);
+
+      // attach wrapper off-screen (so it can be rasterized) then call html2pdf
+      wrapper.style.position = 'fixed';
+      wrapper.style.left = '100vw';
+      wrapper.style.top = '0';
+      wrapper.style.zIndex = '99999';
+      document.body.appendChild(wrapper);
+
+      const filename = `${(item.title||item.name).replace(/\s+/g,'_')}.pdf`;
+      const opt = {
+        margin: [10, 10, 10, 10],
+        filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, allowTaint: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      await html2pdf().set(opt).from(wrapper).save();
+      wrapper.remove();
+    }catch(err){
+      console.error(err);
+      alert('Failed to export PDF: ' + (err && err.message || err));
+    }
+  }
+
+  // Clear
+  safeOn(clearBtn, 'click', ()=>{
+    if(confirm('Clear all uploaded files?')){ state.items = []; render(); }
+  });
+
+  // initial render
+  render();
+
+})();
+</script>
+</body>
+</html>
